@@ -13,64 +13,7 @@
   * along with this program.  If not, see <http://www.gnu.org/licenses/>.
   */
 
-#ifdef cl_amd_media_ops
-#pragma OPENCL EXTENSION cl_amd_media_ops : enable
-#else
-/* taken from https://www.khronos.org/registry/OpenCL/extensions/amd/cl_amd_media_ops.txt
- * Build-in Function
- *     uintn  amd_bitalign (uintn src0, uintn src1, uintn src2)
- *   Description
- *     dst.s0 =  (uint) (((((long)src0.s0) << 32) | (long)src1.s0) >> (src2.s0 & 31))
- *     similar operation applied to other components of the vectors.
- *
- * The implemented function is modified because the last is in our case always a scalar.
- * We can ignore the bitwise AND operation.
- */
-inline uint2 amd_bitalign( const uint2 src0, const uint2 src1, const uint src2)
-{
-	uint2 result;
-	result.s0 =  (uint) (((((long)src0.s0) << 32) | (long)src1.s0) >> (src2));
-	result.s1 =  (uint) (((((long)src0.s1) << 32) | (long)src1.s1) >> (src2));
-	return result;
-}
-#endif
-
-#ifdef cl_amd_media_ops2
 #pragma OPENCL EXTENSION cl_amd_media_ops2 : enable
-#else
-/* taken from: https://www.khronos.org/registry/OpenCL/extensions/amd/cl_amd_media_ops2.txt
- *     Built-in Function:
- *     uintn amd_bfe (uintn src0, uintn src1, uintn src2)
- *   Description
- *     NOTE: operator >> below represent logical right shift
- *     offset = src1.s0 & 31;
- *     width = src2.s0 & 31;
- *     if width = 0
- *         dst.s0 = 0;
- *     else if (offset + width) < 32
- *         dst.s0 = (src0.s0 << (32 - offset - width)) >> (32 - width);
- *     else
- *         dst.s0 = src0.s0 >> offset;
- *     similar operation applied to other components of the vectors
- */
-inline int amd_bfe(const uint src0, const uint offset, const uint width)
-{
-	/* casts are removed because we can implement everything as uint
-	 * int offset = src1;
-	 * int width = src2;
-	 * remove check for edge case, this function is always called with
-	 * `width==8`
-	 * @code
-	 *   if ( width == 0 )
-	 *      return 0;
-	 * @endcode
-	 */
-	if ( (offset + width) < 32u )
-		return (src0 << (32u - offset - width)) >> (32u - width);
-
-	return src0 >> offset;
-}
-#endif
 
 #include "opencl/wolf-aes.cl"
 #include "opencl/wolf-skein.cl"
@@ -382,6 +325,8 @@ void CNKeccak(ulong *output, ulong *input)
 
 static const __constant uchar rcon[8] = { 0x8d, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40 };
 
+#pragma OPENCL EXTENSION cl_amd_media_ops2 : enable
+
 #define BYTE(x, y)	(amd_bfe((x), (y) << 3U, 8U))
 
 #define SubWord(inw)		((sbox[BYTE(inw, 3)] << 24) | (sbox[BYTE(inw, 2)] << 16) | (sbox[BYTE(inw, 1)] << 8) | sbox[BYTE(inw, 0)])
@@ -401,7 +346,7 @@ void AESExpandKey256(uint *keybuf)
 	}
 }
 
-#define IDX(x)	(x)
+#define IDX(x)	((x) * (get_global_size(0)))
 
 __attribute__((reqd_work_group_size(WORKSIZE, 8, 1)))
 __kernel void cn0(__global ulong *input, __global uint4 *Scratchpad, __global ulong *states)
@@ -412,7 +357,7 @@ __kernel void cn0(__global ulong *input, __global uint4 *Scratchpad, __global ul
 	uint4 text;
 	
 	states += (25 * (get_global_id(0) - get_global_offset(0)));
-	Scratchpad += ((get_global_id(0) - get_global_offset(0))) * (0x80000 >> 2);
+	Scratchpad += ((get_global_id(0) - get_global_offset(0)));
 	
 	for(int i = get_local_id(0); i < 256; i += WORKSIZE)
 	{
@@ -422,7 +367,6 @@ __kernel void cn0(__global ulong *input, __global uint4 *Scratchpad, __global ul
 		AES2[i] = rotate(tmp, 16U);
 		AES3[i] = rotate(tmp, 24U);
 	}
-	barrier(CLK_LOCAL_MEM_FENCE);
 	
 	((ulong8 *)State)[0] = vload8(0, input);
 	State[8] = input[8];
@@ -474,7 +418,7 @@ __kernel void cn1(__global uint4 *Scratchpad, __global ulong *states)
 	ulong a[2], b[2];
 	__local uint AES0[256], AES1[256], AES2[256], AES3[256];
 	
-	Scratchpad += ((get_global_id(0) - get_global_offset(0))) * (0x80000 >> 2);
+	Scratchpad += ((get_global_id(0) - get_global_offset(0)));
 	states += (25 * (get_global_id(0) - get_global_offset(0)));
 	
 	for(int i = get_local_id(0); i < 256; i += WORKSIZE)
@@ -485,7 +429,6 @@ __kernel void cn1(__global uint4 *Scratchpad, __global ulong *states)
 		AES2[i] = rotate(tmp, 16U);
 		AES3[i] = rotate(tmp, 24U);
 	}
-	barrier(CLK_LOCAL_MEM_FENCE);
 	
 	a[0] = states[0] ^ states[4];
 	b[0] = states[2] ^ states[6];
@@ -531,7 +474,7 @@ __kernel void cn2(__global uint4 *Scratchpad, __global ulong *states, __global u
 	ulong State[25];
 	uint4 text;
 	
-	Scratchpad += ((get_global_id(0) - get_global_offset(0))) * (0x80000 >> 2);
+	Scratchpad += ((get_global_id(0) - get_global_offset(0)));
 	states += (25 * (get_global_id(0) - get_global_offset(0)));
 	
 	for(int i = get_local_id(0); i < 256; i += WORKSIZE)
@@ -542,7 +485,6 @@ __kernel void cn2(__global uint4 *Scratchpad, __global ulong *states, __global u
 		AES2[i] = rotate(tmp, 16U);
 		AES3[i] = rotate(tmp, 24U);
 	}
-	barrier(CLK_LOCAL_MEM_FENCE);
 	
 	#if defined(__Tahiti__) || defined(__Pitcairn__)
 	
