@@ -401,7 +401,7 @@ void AESExpandKey256(uint *keybuf)
 	}
 }
 
-#define IDX(x)	(x)
+#define IDX(x)	((x) * (get_global_size(0)))
 
 __attribute__((reqd_work_group_size(WORKSIZE, 8, 1)))
 __kernel void cn0(__global ulong *input, __global uint4 *Scratchpad, __global ulong *states)
@@ -412,7 +412,7 @@ __kernel void cn0(__global ulong *input, __global uint4 *Scratchpad, __global ul
 	uint4 text;
 	
 	states += (25 * (get_global_id(0) - get_global_offset(0)));
-	Scratchpad += ((get_global_id(0) - get_global_offset(0))) * (0x80000 >> 2);
+	Scratchpad += ((get_global_id(0) - get_global_offset(0)));
 	
 	for(int i = get_local_id(0); i < 256; i += WORKSIZE)
 	{
@@ -456,7 +456,7 @@ __kernel void cn0(__global ulong *input, __global uint4 *Scratchpad, __global ul
 	mem_fence(CLK_LOCAL_MEM_FENCE);
 	
 	#pragma unroll 2
-	for(int i = 0; i < 0x4000; ++i)
+	for(int i = 0; i < 0x2000; ++i)
 	{
 		#pragma unroll
 		for(int j = 0; j < 10; ++j)
@@ -474,7 +474,7 @@ __kernel void cn1(__global uint4 *Scratchpad, __global ulong *states)
 	ulong a[2], b[2];
 	__local uint AES0[256], AES1[256], AES2[256], AES3[256];
 	
-	Scratchpad += ((get_global_id(0) - get_global_offset(0))) * (0x80000 >> 2);
+	Scratchpad += ((get_global_id(0) - get_global_offset(0)));
 	states += (25 * (get_global_id(0) - get_global_offset(0)));
 	
 	for(int i = get_local_id(0); i < 256; i += WORKSIZE)
@@ -497,23 +497,23 @@ __kernel void cn1(__global uint4 *Scratchpad, __global ulong *states)
 	mem_fence(CLK_LOCAL_MEM_FENCE);
 	
 	#pragma unroll 8
-	for(int i = 0; i < 0x80000; ++i)
+	for(int i = 0; i < 0x40000; ++i)
 	{
 		ulong c[2];
 		
-		((uint4 *)c)[0] = Scratchpad[IDX((a[0] & 0x1FFFF0) >> 4)];
+		((uint4 *)c)[0] = Scratchpad[IDX((a[0] & 0xFFFF0) >> 4)];
 		((uint4 *)c)[0] = AES_Round(AES0, AES1, AES2, AES3, ((uint4 *)c)[0], ((uint4 *)a)[0]);
 		//b_x ^= ((uint4 *)c)[0];
 		
-		Scratchpad[IDX((a[0] & 0x1FFFF0) >> 4)] = b_x ^ ((uint4 *)c)[0];
+		Scratchpad[IDX((a[0] & 0xFFFF0) >> 4)] = b_x ^ ((uint4 *)c)[0];
 		
 		uint4 tmp;
-		tmp = Scratchpad[IDX((c[0] & 0x1FFFF0) >> 4)];
+		tmp = Scratchpad[IDX((c[0] & 0xFFFF0) >> 4)];
 		
 		a[1] += c[0] * as_ulong2(tmp).s0;
 		a[0] += mul_hi(c[0], as_ulong2(tmp).s0);
 		
-		Scratchpad[IDX((c[0] & 0x1FFFF0) >> 4)] = ((uint4 *)a)[0];
+		Scratchpad[IDX((c[0] & 0xFFFF0) >> 4)] = ((uint4 *)a)[0];
 		
 		((uint4 *)a)[0] ^= tmp;
 		
@@ -531,7 +531,7 @@ __kernel void cn2(__global uint4 *Scratchpad, __global ulong *states, __global u
 	ulong State[25];
 	uint4 text;
 	
-	Scratchpad += ((get_global_id(0) - get_global_offset(0))) * (0x80000 >> 2);
+	Scratchpad += ((get_global_id(0) - get_global_offset(0)));
 	states += (25 * (get_global_id(0) - get_global_offset(0)));
 	
 	for(int i = get_local_id(0); i < 256; i += WORKSIZE)
@@ -561,7 +561,7 @@ __kernel void cn2(__global uint4 *Scratchpad, __global ulong *states, __global u
 	barrier(CLK_LOCAL_MEM_FENCE);
 	
 	#pragma unroll 2
-	for(int i = 0; i < 0x4000; ++i)
+	for(int i = 0; i < 0x2000; ++i)
 	{		
 		text ^= Scratchpad[IDX((i << 3) + get_local_id(1))];
 		
@@ -662,23 +662,23 @@ __kernel void cryptonight(__global ulong *input, __global uint4 *Scratchpad, __g
 	uint4 b_x = ((uint4 *)b)[0];
 	
 	//#pragma unroll 1
-	for(int i = 0; i < 0x80000; ++i)
+	for(int i = 0; i < 0x40000; ++i)
 	{
 		ulong c[2];
 		
-		((uint4 *)c)[0] = Scratchpad[(a[0] & 0x1FFFF0) >> 4];
+		((uint4 *)c)[0] = Scratchpad[(a[0] & 0xFFFF0) >> 4];
 		((uint4 *)c)[0] = AES_Round(AES0, AES1, AES2, AES3, ((uint4 *)c)[0], ((uint4 *)a)[0]);
 		b_x ^= ((uint4 *)c)[0];
 		
-		Scratchpad[(a[0] & 0x1FFFF0) >> 4] = b_x;
+		Scratchpad[(a[0] & 0xFFFF0) >> 4] = b_x;
 		
 		uint4 tmp;
-		tmp = Scratchpad[(c[0] & 0x1FFFF0) >> 4];
+		tmp = Scratchpad[(c[0] & 0xFFFF0) >> 4];
 		
 		a[1] += c[0] * as_ulong2(tmp).s0;
 		a[0] += mul_hi(c[0], as_ulong2(tmp).s0);
 		
-		Scratchpad[(c[0] & 0x1FFFF0) >> 4] = ((uint4 *)a)[0];
+		Scratchpad[(c[0] & 0xFFFF0) >> 4] = ((uint4 *)a)[0];
 		
 		((uint4 *)a)[0] ^= tmp;
 		
